@@ -16,7 +16,7 @@ Clear-Host
 Write-Host 'Galaxy M/F-Series OpenDeX' -ForegroundColor Yellow
 
 foreach ($exe in 'scrcpy.exe', 'adb.exe') {
-    if (-not (Test-Path $exe)) { Fail "$exe not found. Run this script from your scrcpy folder." }
+    if (-not (Test-Path $exe)) { Fail "$exe not found. Run Get-Requirements.ps1 first." }
 }
 
 if (-not (Adb devices | Select-String '\sdevice$')) {
@@ -28,7 +28,7 @@ $freeform  = Adb shell settings get global enable_freeform_support
 
 if (-not $installed -or $freeform -ne '1') {
     if (-not $installed) {
-        if (-not (Test-Path 'Taskbar.apk')) { Fail 'Taskbar.apk not found.' }
+        if (-not (Test-Path 'Taskbar.apk')) { Fail 'Taskbar.apk not found. Run Get-Requirements.ps1 first.' }
         Write-Host 'Installing Taskbar...'
         Adb install -r -g Taskbar.apk | Out-Null
         Start-Sleep -Seconds 3
