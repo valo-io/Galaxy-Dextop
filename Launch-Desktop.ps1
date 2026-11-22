@@ -1,97 +1,73 @@
-# Galaxy-M-Desktop Framework v18.0 by Keyan Saini
-$CurrentVersion = "17.5"
+# Galaxy-M-Desktop by Keyan Saini
+Set-Location $PSScriptRoot
+
+$taskbar   = 'com.farmerbb.taskbar'
+$prefsFile = "${taskbar}_preferences.xml"
+$prefsDest = "/data/data/$taskbar/shared_prefs/$prefsFile"
+
+function Fail($message) {
+    Write-Host "Error: $message" -ForegroundColor Red
+    exit 1
+}
+
+function Adb { & .\adb.exe @args }
+
 Clear-Host
-Write-Host "💥 GALAXY M/F-SERIES OPEN-DEX v$CurrentVersion 💥" -ForegroundColor Yellow
-Write-Host "⚙️ Created By Keyan Saini ⚙️" -ForegroundColor Green
+Write-Host 'Galaxy M/F-Series OpenDeX' -ForegroundColor Yellow
 
-# 1. Check Files & Device
-if (-not (Test-Path ".\scrcpy.exe") -or -not (Test-Path ".\adb.exe")) {
-    Write-Host "[X ERROR] Core files missing!" -ForegroundColor Red
-    Exit
-}
-$Devices = .\adb.exe devices | Where-Object { $_ -match '\bdevice\b' }
-if (-not $Devices) { 
-    Write-Host "[X ERROR] Device link failed!" -ForegroundColor Red
-    Exit 
+foreach ($exe in 'scrcpy.exe', 'adb.exe') {
+    if (-not (Test-Path $exe)) { Fail "$exe not found. Run this script from your scrcpy folder." }
 }
 
-# 2. Automated Desktop Shortcut Engine
-$Desk = [Environment]::GetFolderPath("Desktop")
-$Lnk = Join-Path $Desk "Launch OpenDeX Workspace.lnk"
-if (-not (Test-Path $Lnk)) {
-    try {
-        $Wsh = New-Object -ComObject WScript.Shell
-        $Shortcut = $Wsh.CreateShortcut($Lnk)
-        $Shortcut.TargetPath = "powershell.exe"
-        $ScriptPath = $MyInvocation.MyCommand.Path
-        $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File `"$ScriptPath`""
-        $Shortcut.WorkingDirectory = $PSScriptRoot
-        $Shortcut.IconLocation = "shell32.dll, 15"
-        $Shortcut.WindowStyle = 7 
-        $Shortcut.Save()
-        Write-Host "[OK] Desktop shortcut successfully created!" -ForegroundColor Green
-    } catch { 
-        Write-Host "[!] Shortcut creation failed." -ForegroundColor DarkGray 
-    }
+if (-not (Adb devices | Select-String '\sdevice$')) {
+    Fail 'No authorized device found. Check the USB cable and accept the debugging prompt on the phone.'
 }
 
-# 3. Environment & Taskbar Auto-Installer
-$App = .\adb.exe shell pm list packages com.farmerbb.taskbar
-$Free = .\adb.exe shell settings get global enable_freeform_support
+$installed = Adb shell pm list packages $taskbar
+$freeform  = Adb shell settings get global enable_freeform_support
 
-if (-not $App -or $Free -ne "1") {
-    if (-not $App) {
-        if (-not (Test-Path ".\Taskbar.apk")) { 
-            Write-Host "[X] Taskbar.apk missing!" -ForegroundColor Red
-            Exit 
-        }
-        Write-Host "-> Automatically installing Taskbar application..." -ForegroundColor Cyan
-        .\adb.exe install -r -g ".\Taskbar.apk" | Out-Null
+if (-not $installed -or $freeform -ne '1') {
+    if (-not $installed) {
+        if (-not (Test-Path 'Taskbar.apk')) { Fail 'Taskbar.apk not found.' }
+        Write-Host 'Installing Taskbar...'
+        Adb install -r -g Taskbar.apk | Out-Null
         Start-Sleep -Seconds 3
     }
-    .\adb.exe shell pm grant com.farmerbb.taskbar android.permission.WRITE_SECURE_SETTINGS | Out-Null
-    .\adb.exe shell settings put global enable_freeform_support 1 | Out-Null
-    .\adb.exe shell settings put global force_resizable_activities 1 | Out-Null
+    Adb shell pm grant $taskbar android.permission.WRITE_SECURE_SETTINGS | Out-Null
+    Adb shell settings put global enable_freeform_support 1
+    Adb shell settings put global force_resizable_activities 1
 }
 
-# 4. Automated Preference Injection
-if (Test-Path ".\com.farmerbb.taskbar_preferences.xml") {
-    Write-Host "-> Injecting pre-configured OpenDeX interface settings..." -ForegroundColor Cyan
-    .\adb.exe push ".\com.farmerbb.taskbar_preferences.xml" "/data/local/tmp/prefs.xml" | Out-Null
-    .\adb.exe shell "run-as com.farmerbb.taskbar cp /data/local/tmp/prefs.xml /data/data/com.farmerbb.taskbar/shared_prefs/com.farmerbb.taskbar_preferences.xml" 2>$null
-    .\adb.exe shell "run-as com.farmerbb.taskbar chmod 660 /data/data/com.farmerbb.taskbar/shared_prefs/com.farmerbb.taskbar_preferences.xml" 2>$null
-    .\adb.exe shell "rm /data/local/tmp/prefs.xml" | Out-Null
+if (Test-Path $prefsFile) {
+    Adb push $prefsFile /data/local/tmp/prefs.xml | Out-Null
+    Adb shell "run-as $taskbar cp /data/local/tmp/prefs.xml $prefsDest" 2>$null
+    Adb shell "run-as $taskbar chmod 660 $prefsDest" 2>$null
+    Adb shell rm /data/local/tmp/prefs.xml
 } else {
-    Write-Host "[!] Preference template missing. Running with defaults." -ForegroundColor DarkGray
+    Write-Host "$prefsFile not found, using Taskbar defaults." -ForegroundColor DarkGray
 }
 
-# 5. Start Desktop Environment & Hide Navigation Buttons
-Write-Host "-> Activating desktop home workspace..." -ForegroundColor Yellow
-.\adb.exe shell cmd package set-home-activity com.farmerbb.taskbar/.activity.MainActivity | Out-Null
-.\adb.exe shell am broadcast -a com.farmerbb.taskbar.START_STOP_TASKBAR --ez start true | Out-Null
-.\adb.exe shell settings put global policy_control immersive.navigation=*
-Start-Sleep -Seconds 1
+try {
+    Adb shell cmd package set-home-activity "$taskbar/.activity.MainActivity" | Out-Null
+    Adb shell am broadcast -a "$taskbar.START_STOP_TASKBAR" --ez start true | Out-Null
+    Adb shell settings put global policy_control 'immersive.navigation=*'
+    Start-Sleep -Seconds 1
 
-# 6. Launch Widescreen Display Layer
-$Args = @(
-    "--new-display=1920x1080/160",
-    "--max-fps=60",
-    "--video-bit-rate=16M",
-    "--render-driver=direct3d11",
-    "--window-title=OpenDeX-Workspace",
-    "--shortcut-mod=lctrl,lalt",
-    "--always-on-top"
-)
-Start-Process -FilePath ".\scrcpy.exe" -ArgumentList $Args -WindowStyle Normal -Wait
-
-# 7. Automated Teardown & Reset Navigation Buttons to Default
-Write-Host "`n=========================================" -ForegroundColor Cyan
-Write-Host "Session closed down cleanly. Restoring system profile..." -ForegroundColor Yellow
-
-.\adb.exe shell am broadcast -a com.farmerbb.taskbar.START_STOP_TASKBAR --ez start false | Out-Null
-.\adb.exe shell am force-stop com.farmerbb.taskbar | Out-Null
-.\adb.exe shell cmd package set-home-activity com.sec.android.app.launcher/.Launcher | Out-Null
-.\adb.exe shell settings put global policy_control null
-
-Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "[OK] Samsung One UI Restored!" -ForegroundColor Green
+    $scrcpyArgs = @(
+        '--new-display=1920x1080/160'
+        '--max-fps=60'
+        '--video-bit-rate=16M'
+        '--render-driver=direct3d11'
+        '--window-title=OpenDeX-Workspace'
+        '--shortcut-mod=lctrl,lalt'
+        '--always-on-top'
+    )
+    & .\scrcpy.exe @scrcpyArgs
+}
+finally {
+    Write-Host 'Restoring One UI...'
+    Adb shell am broadcast -a "$taskbar.START_STOP_TASKBAR" --ez start false | Out-Null
+    Adb shell am force-stop $taskbar
+    Adb shell cmd package set-home-activity com.sec.android.app.launcher/.Launcher | Out-Null
+    Adb shell settings put global policy_control null
+}
